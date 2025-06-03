@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+
+{% block title %}Detection Logs - Safety Detection System{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-list me-2"></i>Detection Logs</h5>
+                <div>
+                    <button class="btn btn-sm btn-outline-danger" onclick="clearLogs()" id="clear-btn">
+                        <i class="fas fa-trash me-1"></i>Clear All
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if logs.items %}
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Camera ID</th>
+                                <th>Warning Level</th>
+                                <th>Categories</th>
+                                <th>Screenshot</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in logs.items %}
+                            <tr>
+                                <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                <td>
+                                    <span class="badge bg-primary">Cam {{ log.camera_id }}</span>
+                                </td>
+                                <td>
+                                    {% if log.warning_level == 0 %}
+                                        <span class="badge bg-success">Safe</span>
+                                    {% elif log.warning_level == 1 %}
+                                        <span class="badge bg-warning">Warning</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">Critical</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ log.categories or 'N/A' }}</td>
+                                <td>
+                                    {% if log.screenshot_data %}
+                                    <button class="btn btn-sm btn-outline-primary" 
+                                            onclick="showScreenshot(this)"
+                                            data-screenshot="{{ log.screenshot_data|tojson|safe }}"
+                                            data-timestamp="{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S')|tojson|safe }}"
+                                            data-bs-toggle="tooltip"
+                                            title="View Screenshot">
+                                        <i class="fas fa-image me-1"></i>View
+                                    </button>
+                                    {% else %}
+                                    <span class="text-muted">No image</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Pagination -->
+                {% if logs.pages > 1 %}
+                <nav aria-label="Logs pagination" class="mt-4">
+                    <ul class="pagination justify-content-center">
+                        {% if logs.has_prev %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('logs', page=logs.prev_num) }}">Previous</a>
+                        </li>
+                        {% endif %}
+                        
+                        {% for page in logs.iter_pages() %}
+                            {% if page %}
+                                {% if page != logs.page %}
+                                <li class="page-item">
+                                    <a class="page-link" href="{{ url_for('logs', page=page) }}">{{ page }}</a>
+                                </li>
+                                {% else %}
+                                <li class="page-item active">
+                                    <span class="page-link">{{ page }}</span>
+                                </li>
+                                {% endif %}
+                            {% else %}
+                            <li class="page-item disabled">
+                                <span class="page-link">...</span>
+                            </li>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if logs.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('logs', page=logs.next_num) }}">Next</a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+                
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No logs found</h5>
+                    <p class="text-muted">Detection logs will appear here when safety violations are detected.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Screenshot Modal -->
+<div class="modal fade" id="screenshotModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Detection Screenshot</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <div id="screenshot-loading" class="d-none">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Loading screenshot...</p>
+                </div>
+                <div id="screenshot-error" class="d-none">
+                    <i class="fas fa-exclamation-circle fa-3x text-danger mb-3"></i>
+                    <p class="text-danger">Failed to load screenshot</p>
+                </div>
+                <img id="screenshot-image" class="img-fluid" alt="Detection Screenshot" style="display: none;">
+                <p id="screenshot-timestamp" class="mt-2 text-muted"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" onclick="downloadScreenshot()" id="download-btn" disabled>
+                    <i class="fas fa-download me-1"></i>Download
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentScreenshotData = null;
+    let currentTimestamp = null;
+    
+    // Initialize tooltips
+    document.addEventListener('DOMContentLoaded', function() {
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl);
+        });
+    });
+    
+    function showScreenshot(button) {
+        currentScreenshotData = button.dataset.screenshot;
+        currentTimestamp = button.dataset.timestamp;
+        
+        const img = document.getElementById('screenshot-image');
+        const timestampElement = document.getElementById('screenshot-timestamp');
+        const loadingElement = document.getElementById('screenshot-loading');
+        const errorElement = document.getElementById('screenshot-error');
+        const downloadBtn = document.getElementById('download-btn');
+        
+        // Show loading state
+        loadingElement.classList.remove('d-none');
+        img.style.display = 'none';
+        errorElement.classList.add('d-none');
+        downloadBtn.disabled = true;
+        
+        // Load image
+        img.onload = function() {
+            loadingElement.classList.add('d-none');
+            img.style.display = 'block';
+            downloadBtn.disabled = false;
+        };
+        
+        img.onerror = function() {
+            loadingElement.classList.add('d-none');
+            errorElement.classList.remove('d-none');
+            downloadBtn.disabled = true;
+        };
+        
+        img.src = 'data:image/jpeg;base64,' + currentScreenshotData;
+        timestampElement.textContent = 'Captured: ' + currentTimestamp;
+        
+        const modal = new bootstrap.Modal(document.getElementById('screenshotModal'));
+        modal.show();
+    }
+    
+    function downloadScreenshot() {
+        if (currentScreenshotData && currentTimestamp) {
+            const link = document.createElement('a');
+            link.href = 'data:image/jpeg;base64,' + currentScreenshotData;
+            link.download = 'detection_' + currentTimestamp.replace(/[:\s]/g, '_') + '.jpg';
+            link.click();
+        }
+    }
+    
+    function clearLogs() {
+        if (confirm('Are you sure you want to clear all detection logs? This action cannot be undone.')) {
+            const clearBtn = document.getElementById('clear-btn');
+            clearBtn.disabled = true;
+            clearBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Clearing...';
+            
+            fetch('/api/clear_logs', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert('Failed to clear logs: ' + (data.error || 'Unknown error'));
+                    clearBtn.disabled = false;
+                    clearBtn.innerHTML = '<i class="fas fa-trash me-1"></i>Clear All';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to clear logs: ' + error.message);
+                clearBtn.disabled = false;
+                clearBtn.innerHTML = '<i class="fas fa-trash me-1"></i>Clear All';
+            });
+        }
+    }
+</script>
+{% endblock %}

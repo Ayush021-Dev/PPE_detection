@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}Live Feed - Safety Detection System{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-video me-2"></i>Live Camera Feed</h5>
+                <div>
+                    <span class="badge bg-success" id="status-badge">
+                        <i class="fas fa-circle me-1"></i>Live
+                    </span>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="video-container">
+                    <img src="{{ url_for('video_feed') }}" 
+                         alt="Live Video Feed" 
+                         class="img-fluid w-100"
+                         id="video-feed"
+                         onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQwIiBoZWlnaHQ9IjQ4MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZGRkIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxOCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkNhbWVyYSBOb3QgQXZhaWxhYmxlPC90ZXh0Pjwvc3ZnPg=='">
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="card mb-3">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i>Detection Status</h5>
+            </div>
+            <div class="card-body">
+                <div class="status-indicator mb-3">
+                    <div class="d-flex align-items-center">
+                        <div class="status-light safe" id="status-light"></div>
+                        <span class="ms-2" id="status-text">System Active</span>
+                    </div>
+                </div>
+                
+                <div class="detection-stats">
+                    <div class="row text-center">
+                        <div class="col-6">
+                            <div class="stat-box bg-success text-white rounded p-2">
+                                <i class="fas fa-hard-hat"></i>
+                                <div class="mt-1">
+                                    <small>Helmet</small>
+                                    <div class="fw-bold" id="helmet-count">0</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="stat-box bg-primary text-white rounded p-2">
+                                <i class="fas fa-vest"></i>
+                                <div class="mt-1">
+                                    <small>Boiler Suit</small>
+                                    <div class="fw-bold" id="boiler-count">0</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mb-3">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Safety Alerts</h5>
+            </div>
+            <div class="card-body">
+                <div id="alerts-container">
+                    <div class="alert alert-success" role="alert">
+                        <i class="fas fa-check-circle me-2"></i>
+                        All safety equipment detected
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-cog me-2"></i>System Info</h5>
+            </div>
+            <div class="card-body">
+                <div class="system-info">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Model Status:</span>
+                        <span class="badge bg-success" id="model-status">Loaded</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Camera:</span>
+                        <span class="badge bg-success" id="camera-status">Active</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Last Update:</span>
+                        <span id="last-update">Just now</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-history me-2"></i>Recent Alerts</h5>
+                <a href="{{ url_for('logs') }}" class="btn btn-sm btn-outline-primary">
+                    View All Logs
+                </a>
+            </div>
+            <div class="card-body">
+                <div id="recent-alerts">
+                    <p class="text-muted">No recent alerts</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Check system status periodically
+    function checkSystemStatus() {
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('model-status').textContent = data.model_loaded ? 'Loaded' : 'Error';
+                document.getElementById('model-status').className = data.model_loaded ? 'badge bg-success' : 'badge bg-danger';
+                
+                document.getElementById('camera-status').textContent = data.camera_active ? 'Active' : 'Inactive';
+                document.getElementById('camera-status').className = data.camera_active ? 'badge bg-success' : 'badge bg-danger';
+            })
+            .catch(error => {
+                console.error('Status check failed:', error);
+            });
+    }
+    
+    // Load recent alerts
+    function loadRecentAlerts() {
+        fetch('/api/logs')
+            .then(response => response.json())
+            .then(data => {
+                const container = document.getElementById('recent-alerts');
+                if (data.length === 0) {
+                    container.innerHTML = '<p class="text-muted">No recent alerts</p>';
+                } else {
+                    container.innerHTML = data.slice(0, 5).map(log => `
+                        <div class="alert alert-${log.warning_level >= 2 ? 'danger' : 'warning'} py-2">
+                            <div class="d-flex justify-content-between">
+                                <span>${log.categories}</span>
+                                <small>${log.timestamp}</small>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            })
+            .catch(error => {
+                console.error('Failed to load alerts:', error);
+            });
+    }
+    
+    // Update last update time
+    function updateTimestamp() {
+        document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+    }
+    
+    // Initialize
+    checkSystemStatus();
+    loadRecentAlerts();
+    updateTimestamp();
+    
+    // Set up periodic updates
+    setInterval(checkSystemStatus, 10000); // Every 10 seconds
+    setInterval(loadRecentAlerts, 5000);   // Every 5 seconds
+    setInterval(updateTimestamp, 1000);    // Every second
+</script>
+{% endblock %}
