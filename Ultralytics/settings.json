@@ -1,0 +1,21 @@
+{
+  "settings_version": "0.0.6",
+  "datasets_dir": "C:\\FlaskTest\\datasets",
+  "weights_dir": "C:\\FlaskTest\\PPE\\weights",
+  "runs_dir": "C:\\FlaskTest\\PPE\\runs",
+  "uuid": "840b2100db0608bbb4cebdb146ca7e57b366ced4bda099229baf98a199929eda",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "hub": true,
+  "mlflow": true,
+  "neptune": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}

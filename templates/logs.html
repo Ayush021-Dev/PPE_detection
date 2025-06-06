@@ -22,7 +22,9 @@
                             <tr>
                                 <th>Timestamp</th>
                                 <th>Camera ID</th>
-                                <th>Warning Level</th>
+                                <th>Unsafe People</th>
+                                <th>No Helmet</th>
+                                <th>No Boiler</th>
                                 <th>Categories</th>
                                 <th>Screenshot</th>
                             </tr>
@@ -31,29 +33,22 @@
                             {% for log in logs.items %}
                             <tr>
                                 <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                                <td>
-                                    <span class="badge bg-primary">Cam {{ log.camera_id }}</span>
-                                </td>
-                                <td>
-                                    {% if log.warning_level == 0 %}
-                                        <span class="badge bg-success">Safe</span>
-                                    {% elif log.warning_level == 1 %}
-                                        <span class="badge bg-warning">Warning</span>
-                                    {% else %}
-                                        <span class="badge bg-danger">Critical</span>
-                                    {% endif %}
-                                </td>
-                                <td>{{ log.categories or 'N/A' }}</td>
+                                <td>{{ log.camera_id }}</td>
+                                <td>{{ log.total_people }}</td>
+                                <td>{{ log.no_helmet_count }}</td>
+                                <td>{{ log.no_boiler_count }}</td>
+                                <td>{{ log.categories }}</td>
                                 <td>
                                     {% if log.screenshot_data %}
-                                    <button class="btn btn-sm btn-outline-primary" 
-                                            onclick="showScreenshot(this)"
-                                            data-screenshot="{{ log.screenshot_data|tojson|safe }}"
-                                            data-timestamp="{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S')|tojson|safe }}"
-                                            data-bs-toggle="tooltip"
-                                            title="View Screenshot">
-                                        <i class="fas fa-image me-1"></i>View
-                                    </button>
+                                    <img src="data:image/jpeg;base64,{{ log.screenshot_data }}" 
+                                         class="screenshot-thumbnail" 
+                                         alt="Detection Screenshot"
+                                         onclick="showScreenshot(this)"
+                                         data-screenshot="{{ log.screenshot_data|tojson|safe }}"
+                                         data-timestamp="{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S')|tojson|safe }}"
+                                         style="width: 100px; height: 75px; object-fit: cover; cursor: pointer; border-radius: 4px;"
+                                         data-bs-toggle="tooltip"
+                                         title="Click to view full size">
                                     {% else %}
                                     <span class="text-muted">No image</span>
                                     {% endif %}
@@ -66,41 +61,38 @@
                 
                 <!-- Pagination -->
                 {% if logs.pages > 1 %}
-                <nav aria-label="Logs pagination" class="mt-4">
+                <nav aria-label="Page navigation" class="mt-4">
                     <ul class="pagination justify-content-center">
                         {% if logs.has_prev %}
                         <li class="page-item">
-                            <a class="page-link" href="{{ url_for('logs', page=logs.prev_num) }}">Previous</a>
+                            <a class="page-link" href="{{ url_for('logs', page=logs.prev_num) }}" aria-label="Previous">
+                                <span aria-hidden="true">&laquo;</span>
+                            </a>
                         </li>
                         {% endif %}
                         
-                        {% for page in logs.iter_pages() %}
-                            {% if page %}
-                                {% if page != logs.page %}
-                                <li class="page-item">
-                                    <a class="page-link" href="{{ url_for('logs', page=page) }}">{{ page }}</a>
+                        {% for page_num in logs.iter_pages(left_edge=2, left_current=2, right_current=3, right_edge=2) %}
+                            {% if page_num %}
+                                <li class="page-item {% if page_num == logs.page %}active{% endif %}">
+                                    <a class="page-link" href="{{ url_for('logs', page=page_num) }}">{{ page_num }}</a>
                                 </li>
-                                {% else %}
-                                <li class="page-item active">
-                                    <span class="page-link">{{ page }}</span>
-                                </li>
-                                {% endif %}
                             {% else %}
-                            <li class="page-item disabled">
-                                <span class="page-link">...</span>
-                            </li>
+                                <li class="page-item disabled">
+                                    <span class="page-link">...</span>
+                                </li>
                             {% endif %}
                         {% endfor %}
                         
                         {% if logs.has_next %}
                         <li class="page-item">
-                            <a class="page-link" href="{{ url_for('logs', page=logs.next_num) }}">Next</a>
+                            <a class="page-link" href="{{ url_for('logs', page=logs.next_num) }}" aria-label="Next">
+                                <span aria-hidden="true">&raquo;</span>
+                            </a>
                         </li>
                         {% endif %}
                     </ul>
                 </nav>
                 {% endif %}
-                
                 {% else %}
                 <div class="text-center py-5">
                     <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
@@ -144,64 +136,66 @@
         </div>
     </div>
 </div>
+
+<style>
+.screenshot-thumbnail {
+    transition: transform 0.2s;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.screenshot-thumbnail:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+</style>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    let currentScreenshotData = null;
-    let currentTimestamp = null;
-    
-    // Initialize tooltips
-    document.addEventListener('DOMContentLoaded', function() {
-        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-            return new bootstrap.Tooltip(tooltipTriggerEl);
-        });
-    });
-    
-    function showScreenshot(button) {
-        currentScreenshotData = button.dataset.screenshot;
-        currentTimestamp = button.dataset.timestamp;
-        
-        const img = document.getElementById('screenshot-image');
-        const timestampElement = document.getElementById('screenshot-timestamp');
-        const loadingElement = document.getElementById('screenshot-loading');
-        const errorElement = document.getElementById('screenshot-error');
+    function showScreenshot(img) {
+        const modal = new bootstrap.Modal(document.getElementById('screenshotModal'));
+        const modalImg = document.getElementById('screenshot-image');
+        const timestamp = document.getElementById('screenshot-timestamp');
+        const loading = document.getElementById('screenshot-loading');
+        const error = document.getElementById('screenshot-error');
         const downloadBtn = document.getElementById('download-btn');
         
         // Show loading state
-        loadingElement.classList.remove('d-none');
-        img.style.display = 'none';
-        errorElement.classList.add('d-none');
+        loading.classList.remove('d-none');
+        modalImg.style.display = 'none';
+        error.classList.add('d-none');
         downloadBtn.disabled = true;
         
+        // Show modal
+        modal.show();
+        
         // Load image
-        img.onload = function() {
-            loadingElement.classList.add('d-none');
-            img.style.display = 'block';
+        modalImg.onload = function() {
+            loading.classList.add('d-none');
+            modalImg.style.display = 'block';
             downloadBtn.disabled = false;
         };
         
-        img.onerror = function() {
-            loadingElement.classList.add('d-none');
-            errorElement.classList.remove('d-none');
-            downloadBtn.disabled = true;
+        modalImg.onerror = function() {
+            loading.classList.add('d-none');
+            error.classList.remove('d-none');
         };
         
-        img.src = 'data:image/jpeg;base64,' + currentScreenshotData;
-        timestampElement.textContent = 'Captured: ' + currentTimestamp;
-        
-        const modal = new bootstrap.Modal(document.getElementById('screenshotModal'));
-        modal.show();
+        modalImg.src = 'data:image/jpeg;base64,' + img.dataset.screenshot;
+        timestamp.textContent = 'Detected at: ' + img.dataset.timestamp;
     }
     
     function downloadScreenshot() {
-        if (currentScreenshotData && currentTimestamp) {
-            const link = document.createElement('a');
-            link.href = 'data:image/jpeg;base64,' + currentScreenshotData;
-            link.download = 'detection_' + currentTimestamp.replace(/[:\s]/g, '_') + '.jpg';
-            link.click();
-        }
+        const img = document.getElementById('screenshot-image');
+        const timestamp = document.getElementById('screenshot-timestamp').textContent;
+        
+        // Create a temporary link
+        const link = document.createElement('a');
+        link.download = 'detection_' + timestamp.replace(/[^0-9]/g, '') + '.jpg';
+        link.href = img.src;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
     
     function clearLogs() {

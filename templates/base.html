@@ -8,50 +8,222 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
+        :root {
+            --sidebar-width: 350px;
+            --navbar-height: 60px;
+            --transition-speed: 0.3s;
+        }
+        
         body {
             min-height: 100vh;
             display: flex;
             flex-direction: column;
+            background-color: #f8f9fa;
+            overflow-x: hidden;
         }
-        main {
-            flex: 1;
-            padding: 2rem 0;
-        }
+        
         .navbar {
+            height: var(--navbar-height);
             box-shadow: 0 2px 4px rgba(0,0,0,.1);
+            background: #fff !important;
+            padding: 0 1rem;
+            z-index: 1030;
         }
-        .card {
-            box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,.075);
+        
+        .navbar-brand {
+            color: #2c3e50 !important;
+            font-weight: 600;
+        }
+        
+        .menu-button {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background-color var(--transition-speed);
+        }
+        
+        .menu-button:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .menu-dropdown {
+            position: absolute;
+            top: var(--navbar-height);
+            right: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            padding: 0.5rem 0;
+            min-width: 200px;
+            display: none;
+            z-index: 1000;
+        }
+        
+        .menu-dropdown.show {
+            display: block;
+        }
+        
+        .menu-item {
+            padding: 0.75rem 1rem;
+            color: #2c3e50;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            transition: background-color var(--transition-speed);
+        }
+        
+        .menu-item:hover {
+            background-color: #f8f9fa;
+            color: #2c3e50;
+        }
+        
+        .menu-item i {
+            width: 24px;
+            margin-right: 0.5rem;
+        }
+        
+        .main-wrapper {
+            display: flex;
+            flex: 1;
+            transition: margin-right var(--transition-speed);
+        }
+        
+        .main-content {
+            flex: 1;
+            padding: 1rem;
+            transition: margin-right var(--transition-speed);
+            min-width: 0; /* Prevents flex item from overflowing */
+        }
+        
+        .sidebar {
+            position: fixed;
+            top: var(--navbar-height);
+            right: 0;
+            width: var(--sidebar-width);
+            height: calc(100vh - var(--navbar-height));
+            background: white;
+            box-shadow: -2px 0 4px rgba(0,0,0,.1);
+            padding: 1rem;
+            transform: translateX(100%);
+            transition: transform var(--transition-speed);
+            z-index: 1020;
+            overflow-y: auto;
+        }
+        
+        .sidebar.show {
+            transform: translateX(0);
+        }
+        
+        .main-wrapper.sidebar-open {
+            margin-right: var(--sidebar-width);
+        }
+        
+        .sidebar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .sidebar-title {
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: #2c3e50;
+            margin: 0;
+        }
+        
+        .sidebar-close {
+            background: none;
+            border: none;
+            color: #6c757d;
+            cursor: pointer;
+            padding: 0.25rem;
+            transition: color var(--transition-speed);
+        }
+        
+        .sidebar-close:hover {
+            color: #2c3e50;
+        }
+        
+        @media (max-width: 768px) {
+            :root {
+                --sidebar-width: 100%;
+            }
+            
+            .main-wrapper.sidebar-open {
+                margin-right: 0;
+            }
         }
     </style>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container">
+    <nav class="navbar navbar-expand-lg">
+        <div class="container-fluid">
             <a class="navbar-brand" href="{{ url_for('index') }}">
                 <i class="fas fa-shield-alt me-2"></i>Safety Detection System
             </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <div class="navbar-nav ms-auto">
-                    <a class="nav-link" href="{{ url_for('index') }}">
-                        <i class="fas fa-video me-1"></i>Live Feed
-                    </a>
-                    <a class="nav-link" href="{{ url_for('logs') }}">
-                        <i class="fas fa-list me-1"></i>View Logs
-                    </a>
+            <div class="menu-button" onclick="toggleMenu()">
+                <i class="fas fa-ellipsis-v"></i>
+            </div>
+            <div class="menu-dropdown" id="menuDropdown">
+                <a href="{{ url_for('index') }}" class="menu-item">
+                    <i class="fas fa-video"></i>Live Feed
+                </a>
+                <a href="{{ url_for('logs') }}" class="menu-item">
+                    <i class="fas fa-list"></i>View Logs
+                </a>
+                <div class="menu-item" onclick="toggleSidebar()">
+                    <i class="fas fa-history"></i>Live Logs
                 </div>
             </div>
         </div>
     </nav>
 
-    <main class="container">
-        {% block content %}{% endblock %}
-    </main>
+    <div class="main-wrapper" id="mainWrapper">
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h5 class="sidebar-title">Live Logs</h5>
+                <button class="sidebar-close" onclick="toggleSidebar()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="liveLogs"></div>
+        </div>
+
+        <main class="main-content" id="mainContent">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function toggleMenu() {
+            document.getElementById('menuDropdown').classList.toggle('show');
+        }
+        
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const mainWrapper = document.getElementById('mainWrapper');
+            sidebar.classList.toggle('show');
+            mainWrapper.classList.toggle('sidebar-open');
+            document.getElementById('menuDropdown').classList.remove('show');
+        }
+        
+        // Close menu when clicking outside
+        document.addEventListener('click', function(event) {
+            const menuDropdown = document.getElementById('menuDropdown');
+            const menuButton = document.querySelector('.menu-button');
+            if (!menuButton.contains(event.target) && !menuDropdown.contains(event.target)) {
+                menuDropdown.classList.remove('show');
+            }
+        });
+    </script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>
