@@ -1,4 +1,5 @@
 flask/
 web.config
-
+instance/
 static/uploads/
+__pycache__

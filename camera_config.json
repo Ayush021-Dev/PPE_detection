@@ -1,0 +1,79 @@
+{
+  "cameras": [
+    {
+      "id": 2,
+      "name": "Webcam",
+      "source": 0,
+      "enabled": true,
+      "type": "webcam",
+      "description": "Default webcam"
+    },
+    {
+      "id": 1,
+      "name": "IP Camera 1",
+      "source": "rtsp://admin:password@192.168.1.100:554/stream1",
+      "enabled": false,
+      "type": "ip_camera",
+      "description": "Main entrance camera"
+    },
+    {
+      "id": 3,
+      "name": "IP Camera 2",
+      "source": "rtsp://admin:password@192.168.1.101:554/stream1",
+      "enabled": false,
+      "type": "ip_camera",
+      "description": "Work area camera"
+    },
+    {
+      "id": 4,
+      "name": "USB Camera",
+      "source": 1,
+      "enabled": false,
+      "type": "usb_camera",
+      "description": "Secondary USB camera"
+    },
+    {
+      "id": 5,
+      "name": "Network Camera 1",
+      "source": "http://192.168.1.102:8080/video",
+      "enabled": false,
+      "type": "network_camera",
+      "description": "Network streaming camera"
+    },
+    {
+      "id": 6,
+      "name": "Camera 6",
+      "source": null,
+      "enabled": false,
+      "type": "placeholder",
+      "description": "Reserved slot"
+    },
+    {
+      "id": 7,
+      "name": "Camera 7",
+      "source": null,
+      "enabled": false,
+      "type": "placeholder",
+      "description": "Reserved slot"
+    },
+    {
+      "id": 8,
+      "name": "Camera 8",
+      "source": null,
+      "enabled": false,
+      "type": "placeholder",
+      "description": "Reserved slot"
+    }
+  ],
+  "settings": {
+    "max_cameras": 8,
+    "default_resolution": {
+      "width": 640,
+      "height": 480
+    },
+    "detection_confidence": 0.3,
+    "warning_interval": 10,
+    "screenshot_interval": 15,
+    "screenshot_on_new_warning": true
+  }
+}

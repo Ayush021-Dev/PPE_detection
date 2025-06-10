@@ -8,13 +8,16 @@
         <div class="col-12">
             <div class="d-flex justify-content-between align-items-center">
                 <h4 class="mb-0"><i class="fas fa-video me-2"></i>Live Feeds</h4>
-                <div class="btn-group">
-                    <button class="btn btn-outline-primary" onclick="previousPage()" id="prevBtn">
-                        <i class="fas fa-chevron-left"></i> Previous
-                    </button>
-                    <button class="btn btn-outline-primary" onclick="nextPage()" id="nextBtn">
-                        Next <i class="fas fa-chevron-right"></i>
-                    </button>
+                <div class="d-flex align-items-center gap-3">
+                    <span class="page-info">Page <span id="pageNumber">1</span> of <span id="totalPagesSpan">2</span></span>
+                    <div class="btn-group">
+                        <button class="btn btn-outline-primary" onclick="previousPage()" id="prevBtn">
+                            <i class="fas fa-chevron-left"></i> Previous
+                        </button>
+                        <button class="btn btn-outline-primary" onclick="nextPage()" id="nextBtn">
+                            Next <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -23,25 +26,8 @@
     <div class="row">
         <div class="col-12">
             <div class="camera-grid">
-                <div class="row g-3">
-                    {% for i in range(4) %}
-                    <div class="col-md-6">
-                        <div class="camera-feed" data-camera-id="{{ current_page * 4 + i + 1 }}" onclick="focusCamera(this.dataset.cameraId)">
-                            <div class="camera-header">
-                                <span class="camera-title">Camera {{ current_page * 4 + i + 1 }}</span>
-                                <span class="camera-status" id="status-{{ current_page * 4 + i + 1 }}">
-                                    <i class="fas fa-circle text-danger"></i> Offline
-                                </span>
-                            </div>
-                            <div class="camera-container" id="camera-{{ current_page * 4 + i + 1 }}">
-                                <div class="camera-placeholder">
-                                    <i class="fas fa-video-slash"></i>
-                                    <span>Camera Offline</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    {% endfor %}
+                <div class="row g-3" id="cameraGrid">
+                    <!-- Camera feeds will be generated dynamically by JavaScript -->
                 </div>
             </div>
         </div>
@@ -53,7 +39,7 @@
     <div class="modal-dialog modal-xl">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Camera <span id="modalCameraId"></span></h5>
+                <h5 class="modal-title">Camera <span id="modalCameraId"></span> - <span id="modalCameraName"></span></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0">
@@ -171,6 +157,11 @@
     filter: brightness(0) invert(1);
 }
 
+.page-info {
+    font-weight: 500;
+    color: #6c757d;
+}
+
 /* Live Logs Styling */
 .log-entry {
     background: white;
@@ -231,185 +222,381 @@
 </style>
 
 <script>
-let currentPage = 0;
-const totalPages = 2; // Adjust based on total number of cameras
-let focusedCameraId = null;
-let cameraModal = null;
-
-document.addEventListener('DOMContentLoaded', function() {
-    cameraModal = new bootstrap.Modal(document.getElementById('cameraModal'));
-    // Show sidebar by default
-    toggleSidebar();
-});
-
-function updateCameraStatus() {
-    fetch('/api/status')
-        .then(response => response.json())
-        .then(data => {
-            // Update each camera's status
-            for (let i = 0; i < 4; i++) {
-                const cameraId = currentPage * 4 + i + 1;
-                const statusElement = document.getElementById(`status-${cameraId}`);
-                const containerElement = document.getElementById(`camera-${cameraId}`);
+    let currentPage = 0;
+    let maxCameras = 8;
+    let camerasPerPage = 4;
+    let totalPages = 2;
+    let focusedCameraId = null;
+    let cameraModal = null;
+    let systemStatus = {};
+    let cameraInfo = {};
+    let isInitialized = false;
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        cameraModal = new bootstrap.Modal(document.getElementById('cameraModal'));
+        initializeSystem();
+        // Show sidebar by default
+        toggleSidebar();
+    });
+    
+    function initializeSystem() {
+        // Load system configuration once
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                systemStatus = data;
+                cameraInfo = data.camera_info || {};
+                maxCameras = data.max_cameras || 8;
+                totalPages = Math.ceil(maxCameras / camerasPerPage);
                 
-                if (data.active_cameras[cameraId]) {
-                    // Camera is active
-                    statusElement.innerHTML = '<i class="fas fa-circle text-success"></i> Live';
-                    containerElement.innerHTML = `
-                        <img src="/video_feed?camera_id=${cameraId}" 
-                             class="camera-stream" 
-                             alt="Camera ${cameraId} Feed">
-                    `;
-                } else {
-                    // Camera is offline
-                    statusElement.innerHTML = '<i class="fas fa-circle text-danger"></i> Offline';
-                    containerElement.innerHTML = `
-                        <div class="camera-placeholder">
-                            <i class="fas fa-video-slash"></i>
-                            <span>Camera Offline</span>
+                document.getElementById('totalPagesSpan').textContent = totalPages;
+                console.log(`Loaded from config: ${maxCameras} cameras, ${totalPages} pages`);
+                
+                generateCameraGrid();
+                updateCameraStatus();
+                updatePageControls();
+                isInitialized = true;
+                
+                // Start periodic status checks (less frequent)
+                startPeriodicStatusCheck();
+            })
+            .catch(error => {
+                console.error('Error loading system status:', error);
+                generateCameraGrid();
+                updatePageControls();
+            });
+    }
+    
+    function startPeriodicStatusCheck() {
+        // Check status every 30 seconds instead of 5 seconds
+        setInterval(() => {
+            checkStatusOnly();
+        }, 30000);
+        
+        // Update logs more frequently
+        setInterval(updateLiveLogs, 10000);
+    }
+    
+    function checkStatusOnly() {
+        // Only check status, don't regenerate the entire grid
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                systemStatus = data;
+                cameraInfo = data.camera_info || {};
+                updateCameraStatusOnly();
+            })
+            .catch(error => {
+                console.error('Error checking status:', error);
+            });
+    }
+    
+    function generateCameraGrid() {
+        const cameraGrid = document.getElementById('cameraGrid');
+        const startCamera = (currentPage * camerasPerPage) + 1;
+        
+        console.log(`Generating grid for page ${currentPage + 1}: cameras ${startCamera} to ${startCamera + camerasPerPage - 1}`);
+        
+        let html = '';
+        for (let i = 0; i < camerasPerPage; i++) {
+            const cameraId = startCamera + i;
+            if (cameraId <= maxCameras) {
+                const info = cameraInfo[cameraId] || { 
+                    name: `Camera ${cameraId}`, 
+                    enabled: false,
+                    description: `Camera ${cameraId}`
+                };
+                
+                html += `
+                    <div class="col-md-6">
+                        <div class="camera-feed" data-camera-id="${cameraId}" onclick="focusCamera(${cameraId})">
+                            <div class="camera-header">
+                                <span class="camera-title">${info.name}</span>
+                                <span class="camera-status" id="status-${cameraId}">
+                                    <i class="fas fa-circle text-secondary"></i> Loading...
+                                </span>
+                            </div>
+                            <div class="camera-container" id="camera-${cameraId}">
+                                <div class="camera-placeholder">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <span>Loading...</span>
+                                </div>
+                            </div>
                         </div>
-                    `;
-                }
+                    </div>
+                `;
+            }
+        }
+        cameraGrid.innerHTML = html;
+    }
+    
+    function updateCameraStatus() {
+        const startCamera = (currentPage * camerasPerPage) + 1;
+        
+        for (let i = 0; i < camerasPerPage; i++) {
+            const cameraId = startCamera + i;
+            if (cameraId <= maxCameras) {
+                updateSingleCameraStatus(cameraId);
+            }
+        }
+        
+        if (focusedCameraId) {
+            updateModalCamera();
+        }
+    }
+    
+    function updateCameraStatusOnly() {
+        // Only update status indicators, not the entire feed
+        const startCamera = (currentPage * camerasPerPage) + 1;
+        
+        for (let i = 0; i < camerasPerPage; i++) {
+            const cameraId = startCamera + i;
+            if (cameraId <= maxCameras) {
+                updateSingleCameraStatusIndicator(cameraId);
+            }
+        }
+    }
+    
+    function updateSingleCameraStatus(cameraId) {
+        const statusElement = document.getElementById(`status-${cameraId}`);
+        const containerElement = document.getElementById(`camera-${cameraId}`);
+        
+        if (statusElement && containerElement) {
+            const isActive = systemStatus.active_cameras && systemStatus.active_cameras[cameraId];
+            const info = cameraInfo[cameraId] || { name: `Camera ${cameraId}`, enabled: false };
+            
+            if (isActive && info.enabled) {
+                // Camera is active - load feed WITHOUT cache busting
+                statusElement.innerHTML = '<i class="fas fa-circle text-success"></i> Live';
+                containerElement.innerHTML = `
+                    <img src="/video_feed?camera_id=${cameraId}" 
+                         class="camera-stream" 
+                         alt="${info.name} Feed"
+                         onerror="handleCameraError(this, ${cameraId})">
+                `;
+            } else if (info.enabled) {
+                // Camera is enabled but not active
+                statusElement.innerHTML = '<i class="fas fa-circle text-warning"></i> Connecting';
+                containerElement.innerHTML = `
+                    <div class="camera-placeholder">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <span>Connecting...</span>
+                    </div>
+                `;
+            } else {
+                // Camera is disabled
+                statusElement.innerHTML = '<i class="fas fa-circle text-secondary"></i> Disabled';
+                containerElement.innerHTML = `
+                    <div class="camera-placeholder">
+                        <i class="fas fa-video-slash"></i>
+                        <span>Camera Disabled</span>
+                    </div>
+                `;
+            }
+        }
+    }
+    
+    function updateSingleCameraStatusIndicator(cameraId) {
+        // Only update the status indicator, not the entire feed
+        const statusElement = document.getElementById(`status-${cameraId}`);
+        
+        if (statusElement) {
+            const isActive = systemStatus.active_cameras && systemStatus.active_cameras[cameraId];
+            const info = cameraInfo[cameraId] || { name: `Camera ${cameraId}`, enabled: false };
+            
+            if (isActive && info.enabled) {
+                statusElement.innerHTML = '<i class="fas fa-circle text-success"></i> Live';
+            } else if (info.enabled) {
+                statusElement.innerHTML = '<i class="fas fa-circle text-warning"></i> Connecting';
+            } else {
+                statusElement.innerHTML = '<i class="fas fa-circle text-secondary"></i> Disabled';
+            }
+        }
+    }
+    
+    function handleCameraError(img, cameraId) {
+        const info = cameraInfo[cameraId] || { name: `Camera ${cameraId}` };
+        img.parentElement.innerHTML = `
+            <div class="camera-placeholder">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span>Feed Error</span>
+            </div>
+        `;
+        
+        // Update status indicator
+        const statusElement = document.getElementById(`status-${cameraId}`);
+        if (statusElement) {
+            statusElement.innerHTML = '<i class="fas fa-circle text-danger"></i> Error';
+        }
+    }
+    
+    function updateModalCamera() {
+        const modalContainer = document.getElementById('modalCameraContainer');
+        const modalCameraName = document.getElementById('modalCameraName');
+        
+        if (modalContainer && focusedCameraId) {
+            const isActive = systemStatus.active_cameras && systemStatus.active_cameras[focusedCameraId];
+            const info = cameraInfo[focusedCameraId] || { name: `Camera ${focusedCameraId}`, enabled: false };
+            
+            if (modalCameraName) {
+                modalCameraName.textContent = info.name;
             }
             
-            // Update modal camera if focused
-            if (focusedCameraId) {
-                const modalContainer = document.getElementById('modalCameraContainer');
-                if (data.active_cameras[focusedCameraId]) {
-                    modalContainer.innerHTML = `
-                        <img src="/video_feed?camera_id=${focusedCameraId}" 
-                             class="camera-stream" 
-                             alt="Camera ${focusedCameraId} Feed">
-                    `;
-                } else {
-                    modalContainer.innerHTML = `
-                        <div class="camera-placeholder">
-                            <i class="fas fa-video-slash"></i>
-                            <span>Camera Offline</span>
-                        </div>
-                    `;
-                }
+            if (isActive && info.enabled) {
+                modalContainer.innerHTML = `
+                    <img src="/video_feed?camera_id=${focusedCameraId}" 
+                         class="camera-stream" 
+                         alt="${info.name} Feed"
+                         onerror="this.parentElement.innerHTML='<div class=\\'camera-placeholder\\'><i class=\\'fas fa-exclamation-triangle\\'></i><span>Feed Error</span></div>'">
+                `;
+            } else {
+                modalContainer.innerHTML = `
+                    <div class="camera-placeholder">
+                        <i class="fas fa-video-slash"></i>
+                        <span>Camera ${info.enabled ? 'Offline' : 'Disabled'}</span>
+                    </div>
+                `;
             }
-        })
-        .catch(error => console.error('Error fetching camera status:', error));
-}
-
-function updatePage() {
-    // Update page navigation
-    document.getElementById('prevBtn').disabled = currentPage === 0;
-    document.getElementById('nextBtn').disabled = currentPage >= totalPages - 1;
+        }
+    }
     
-    // Update camera statuses
-    updateCameraStatus();
-}
-
-function previousPage() {
-    if (currentPage > 0) {
-        currentPage--;
-        updatePage();
-    }
-}
-
-function nextPage() {
-    if (currentPage < totalPages - 1) {
-        currentPage++;
-        updatePage();
-    }
-}
-
-function focusCamera(cameraId) {
-    focusedCameraId = parseInt(cameraId);
-    document.getElementById('modalCameraId').textContent = cameraId;
-    cameraModal.show();
-    updateCameraStatus();
-    updateLiveLogs(); // Update logs to show only focused camera
-}
-
-// Initialize page
-updatePage();
-
-// Update camera statuses every 5 seconds
-setInterval(updateCameraStatus, 5000);
-
-// Update live logs
-function updateLiveLogs() {
-    const url = focusedCameraId 
-        ? `/api/logs?camera_id=${focusedCameraId}`
-        : '/api/logs';
+    function updatePageControls() {
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const pageNumber = document.getElementById('pageNumber');
         
-    fetch(url)
-        .then(response => response.json())
-        .then(logs => {
-            const liveLogsContainer = document.getElementById('liveLogs');
-            liveLogsContainer.innerHTML = logs.map(log => `
-                <div class="log-entry ${log.total_people > 0 ? 'warning' : 'safe'}">
-                    <div class="d-flex justify-content-between">
-                        <span class="log-camera">Camera ${log.camera_id}</span>
-                        <span class="log-timestamp">${log.timestamp}</span>
-                    </div>
-                    <div class="log-details">
-                        <div>Total People: ${log.total_people}</div>
-                        <div>No Helmet: ${log.no_helmet_count}</div>
-                        <div>No Boiler: ${log.no_boiler_count}</div>
-                        ${log.categories ? `<div class="log-categories">${log.categories}</div>` : ''}
-                    </div>
-                    ${log.screenshot_data ? `
-                        <div class="log-screenshot">
-                            <img src="data:image/jpeg;base64,${log.screenshot_data}"
-                                 class="screenshot-thumbnail"
-                                 alt="Detection Screenshot"
-                                 onclick="showScreenshotFromLog(this)"
-                                 data-screenshot="${log.screenshot_data}"
-                                 data-timestamp="${log.timestamp}"
-                                 style="width: 60px; height: 45px; object-fit: cover; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.15); margin-top: 6px; cursor: pointer;"/>
-                        </div>
-                    ` : ''}
-                </div>
-            `).join('');
-        })
-        .catch(error => console.error('Error fetching logs:', error));
-}
-
-// Update logs every 5 seconds
-setInterval(updateLiveLogs, 5000);
-updateLiveLogs();
-
-// Handle modal close
-document.getElementById('cameraModal').addEventListener('hidden.bs.modal', function () {
-    focusedCameraId = null;
-    updateLiveLogs(); // Update logs to show all cameras
-});
-
-function showScreenshotFromLog(img) {
-    // Reuse modal logic from logs.html
-    let modal = document.getElementById('screenshotModal');
-    if (!modal) {
-        // Create modal if not present
-        modal = document.createElement('div');
-        modal.className = 'modal fade';
-        modal.id = 'screenshotModal';
-        modal.tabIndex = -1;
-        modal.innerHTML = `
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Detection Screenshot</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body text-center">
-                    <img id="screenshot-image" class="img-fluid" alt="Detection Screenshot" style="display: block; margin: 0 auto;"/>
-                    <p id="screenshot-timestamp" class="mt-2 text-muted"></p>
-                </div>
-            </div>
-        </div>`;
-        document.body.appendChild(modal);
+        if (prevBtn) prevBtn.disabled = currentPage === 0;
+        if (nextBtn) nextBtn.disabled = currentPage >= totalPages - 1;
+        if (pageNumber) pageNumber.textContent = currentPage + 1;
     }
-    const modalImg = modal.querySelector('#screenshot-image');
-    const timestamp = modal.querySelector('#screenshot-timestamp');
-    modalImg.src = 'data:image/jpeg;base64,' + img.dataset.screenshot;
-    timestamp.textContent = 'Detected at: ' + img.dataset.timestamp;
-    const bsModal = new bootstrap.Modal(modal);
-    bsModal.show();
-}
-</script>
-{% endblock %}
+    
+    function previousPage() {
+        if (currentPage > 0) {
+            currentPage--;
+            generateCameraGrid();
+            updateCameraStatus();
+            updatePageControls();
+            console.log(`Switched to page ${currentPage + 1}, showing cameras ${(currentPage * camerasPerPage) + 1}-${Math.min((currentPage + 1) * camerasPerPage, maxCameras)}`);
+        }
+    }
+    
+    function nextPage() {
+        if (currentPage < totalPages - 1) {
+            currentPage++;
+            generateCameraGrid();
+            updateCameraStatus();
+            updatePageControls();
+            console.log(`Switched to page ${currentPage + 1}, showing cameras ${(currentPage * camerasPerPage) + 1}-${Math.min((currentPage + 1) * camerasPerPage, maxCameras)}`);
+        }
+    }
+    
+    function focusCamera(cameraId) {
+        focusedCameraId = parseInt(cameraId);
+        const info = cameraInfo[cameraId] || { name: `Camera ${cameraId}` };
+        
+        document.getElementById('modalCameraId').textContent = cameraId;
+        document.getElementById('modalCameraName').textContent = info.name;
+        
+        cameraModal.show();
+        updateModalCamera();
+        updateLiveLogs();
+    }
+    
+    // Update live logs
+    function updateLiveLogs() {
+        const url = focusedCameraId 
+            ? `/api/logs?camera_id=${focusedCameraId}`
+            : '/api/logs';
+            
+        fetch(url)
+            .then(response => response.json())
+            .then(logs => {
+                const liveLogsContainer = document.getElementById('liveLogs');
+                if (liveLogsContainer) {
+                    liveLogsContainer.innerHTML = logs.length > 0 ? logs.map(log => `
+                        <div class="log-entry ${log.total_people > 0 ? 'warning' : 'safe'}">
+                            <div class="d-flex justify-content-between">
+                                <span class="log-camera">${cameraInfo[log.camera_id]?.name || `Camera ${log.camera_id}`}</span>
+                                <span class="log-timestamp">${formatTimestamp(log.timestamp)}</span>
+                            </div>
+                            <div class="log-details">
+                                <div>Total People: ${log.total_people}</div>
+                                <div>No Helmet: ${log.no_helmet_count}</div>
+                                <div>No Boiler: ${log.no_boiler_count}</div>
+                                ${log.categories ? `<div class="log-categories">${log.categories}</div>` : ''}
+                            </div>
+                            ${log.screenshot_data ? `
+                                <div class="log-screenshot">
+                                    <img src="data:image/jpeg;base64,${log.screenshot_data}"
+                                         class="screenshot-thumbnail"
+                                         alt="Detection Screenshot"
+                                         onclick="showScreenshotFromLog(this)"
+                                         data-screenshot="${log.screenshot_data}"
+                                         data-timestamp="${log.timestamp}"
+                                         style="width: 60px; height: 45px; object-fit: cover; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.15); margin-top: 6px; cursor: pointer;"/>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `).join('') : '<div class="text-center text-muted py-3">No logs available</div>';
+                }
+            })
+            .catch(error => console.error('Error fetching logs:', error));
+    }
+    
+    function formatTimestamp(timestamp) {
+        const date = new Date(timestamp);
+        const now = new Date();
+        const diff = now - date;
+        
+        if (diff < 60000) {
+            return 'Just now';
+        } else if (diff < 3600000) {
+            return Math.floor(diff / 60000) + 'm ago';
+        } else if (diff < 86400000) {
+            return Math.floor(diff / 3600000) + 'h ago';
+        } else {
+            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+        }
+    }
+    
+    // Handle modal close
+    document.getElementById('cameraModal').addEventListener('hidden.bs.modal', function () {
+        focusedCameraId = null;
+        updateLiveLogs();
+    });
+    
+    function showScreenshotFromLog(img) {
+        let modal = document.getElementById('screenshotModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.className = 'modal fade';
+            modal.id = 'screenshotModal';
+            modal.tabIndex = -1;
+            modal.innerHTML = `
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Detection Screenshot</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body text-center">
+                        <img id="screenshot-image" class="img-fluid" alt="Detection Screenshot" style="display: block; margin: 0 auto;"/>
+                        <p id="screenshot-timestamp" class="mt-2 text-muted"></p>
+                    </div>
+                </div>
+            </div>`;
+            document.body.appendChild(modal);
+        }
+        const modalImg = modal.querySelector('#screenshot-image');
+        const timestamp = modal.querySelector('#screenshot-timestamp');
+        modalImg.src = 'data:image/jpeg;base64,' + img.dataset.screenshot;
+        timestamp.textContent = 'Detected at: ' + img.dataset.timestamp;
+        const bsModal = new bootstrap.Modal(modal);
+        bsModal.show();
+    }
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        updateLiveLogs();
+    });
+    </script>
+    {% endblock %}

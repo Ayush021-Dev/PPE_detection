@@ -5,6 +5,7 @@ import numpy as np
 from datetime import datetime
 import base64
 import os
+import json
 from models import db, DetectionLog
 from config import Config
 import threading
@@ -17,14 +18,69 @@ db.init_app(app)
 
 # Global variables
 cameras = {}  # Dictionary to store camera instances
+camera_configs = {}  # Dictionary to store camera configurations
 model = None
 class_names = {0: 'Boiler', 1: 'Helmet', 2: 'NO_Helmet', 3: 'No_Boiler'}
 warning_lock = threading.Lock()
-MAX_CAMERAS = 8  # Maximum number of cameras supported
+MAX_CAMERAS = 8  # Will be updated from config
+CAMERA_CONFIG_FILE = 'camera_config.json'
+
+# Screenshot and detection settings
+DETECTION_CONFIDENCE = 0.3  # Default value, will be updated from config
+WARNING_INTERVAL = 10  # Default value, will be updated from config
+SCREENSHOT_INTERVAL = 15  # Default value, will be updated from config
+SCREENSHOT_ON_NEW_WARNING = True  # Default value, will be updated from config
 
 @app.context_processor
 def inject_now():
     return {'now': datetime.now()}
+
+def load_camera_config():
+    """Load camera configuration from JSON file"""
+    global camera_configs, MAX_CAMERAS, DETECTION_CONFIDENCE, WARNING_INTERVAL, SCREENSHOT_INTERVAL, SCREENSHOT_ON_NEW_WARNING
+    
+    try:
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CAMERA_CONFIG_FILE)
+        
+        with open(config_path, 'r') as f:
+            config_data = json.load(f)
+        
+        # Update global settings
+        settings = config_data.get('settings', {})
+        MAX_CAMERAS = settings.get('max_cameras', 8)
+        DETECTION_CONFIDENCE = settings.get('detection_confidence', 0.3)
+        WARNING_INTERVAL = settings.get('warning_interval', 10)
+        SCREENSHOT_INTERVAL = settings.get('screenshot_interval', 15)
+        SCREENSHOT_ON_NEW_WARNING = settings.get('screenshot_on_new_warning', True)
+        
+        # Store camera configurations
+        for camera in config_data.get('cameras', []):
+            camera_configs[camera['id']] = camera
+        
+        print(f"✓ Loaded configuration for {len(camera_configs)} cameras")
+        print(f"✓ Max cameras set to: {MAX_CAMERAS}")
+        print(f"✓ Detection confidence set to: {DETECTION_CONFIDENCE}")
+        print(f"✓ Warning interval set to: {WARNING_INTERVAL} seconds")
+        print(f"✓ Screenshot interval set to: {SCREENSHOT_INTERVAL} seconds")
+        print(f"✓ Screenshot on new warning: {SCREENSHOT_ON_NEW_WARNING}")
+        return True
+        
+    except FileNotFoundError:
+        print(f"✗ ERROR: Camera configuration file '{CAMERA_CONFIG_FILE}' not found!")
+        print(f"✗ Please create '{CAMERA_CONFIG_FILE}' in the application directory")
+        print(f"✗ Application directory: {os.path.dirname(os.path.abspath(__file__))}")
+        return False
+        
+    except json.JSONDecodeError as e:
+        print(f"✗ ERROR: Invalid JSON in configuration file '{CAMERA_CONFIG_FILE}'")
+        print(f"✗ JSON Error: {str(e)}")
+        print(f"✗ Please check the JSON syntax in your configuration file")
+        return False
+        
+    except Exception as e:
+        print(f"✗ ERROR: Failed to load camera configuration")
+        print(f"✗ Error details: {str(e)}")
+        return False
 
 def load_model():
     global model
@@ -51,31 +107,72 @@ def load_model():
         model = None
 
 def initialize_cameras():
-    """Initialize all cameras at startup"""
-    print("Initializing cameras...")
+    """Initialize cameras based on JSON configuration"""
+    if not camera_configs:
+        print("✗ No camera configurations available. Cannot initialize cameras.")
+        return False
     
-    # Initialize webcam
-    try:
-        cameras[1] = cv2.VideoCapture(0)
-        if cameras[1].isOpened():
-            print("Successfully initialized Camera 1 (webcam)")
-        else:
-            print("Failed to open Camera 1 (webcam)")
-            cameras[1] = None
-    except Exception as e:
-        print(f"Error initializing Camera 1: {str(e)}")
-        cameras[1] = None
+    print("Initializing cameras from configuration...")
+    initialized_count = 0
     
-    # Initialize other cameras as offline
-    for cam_id in range(2, MAX_CAMERAS + 1):
-        cameras[cam_id] = None
-        print(f"Camera {cam_id} initialized as offline")
+    for cam_id, config in camera_configs.items():
+        if not config.get('enabled', False):
+            cameras[cam_id] = None
+            print(f"  Camera {cam_id} ({config.get('name', 'Unknown')}) - Disabled")
+            continue
+            
+        source = config.get('source')
+        if source is None:
+            cameras[cam_id] = None
+            print(f"  Camera {cam_id} ({config.get('name', 'Unknown')}) - No source specified")
+            continue
+        
+        try:
+            print(f"  Initializing Camera {cam_id} ({config.get('name', 'Unknown')}) with source: {source}")
+            
+            camera = cv2.VideoCapture(source)
+            
+            # Set resolution if specified in config
+            resolution = camera_configs.get('settings', {}).get('default_resolution', {})
+            if resolution:
+                camera.set(cv2.CAP_PROP_FRAME_WIDTH, resolution.get('width', 640))
+                camera.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution.get('height', 480))
+            
+            if camera.isOpened():
+                cameras[cam_id] = camera
+                initialized_count += 1
+                print(f"  ✓ Successfully initialized Camera {cam_id}")
+            else:
+                cameras[cam_id] = None
+                print(f"  ✗ Failed to open Camera {cam_id}")
+                
+        except Exception as e:
+            cameras[cam_id] = None
+            print(f"  ✗ Error initializing Camera {cam_id}: {str(e)}")
+    
+    # Initialize any missing camera slots as None
+    for cam_id in range(1, MAX_CAMERAS + 1):
+        if cam_id not in cameras:
+            cameras[cam_id] = None
+    
+    print(f"✓ Camera initialization complete. {initialized_count} cameras active.")
+    return initialized_count > 0
 
 def get_camera(camera_id):
     if camera_id not in cameras:
         print(f"Camera {camera_id} not found in cameras dictionary")
         return None
     return cameras[camera_id]
+
+def get_camera_info(camera_id):
+    """Get camera configuration information"""
+    return camera_configs.get(camera_id, {
+        'id': camera_id,
+        'name': f'Camera {camera_id}',
+        'enabled': False,
+        'type': 'unknown',
+        'description': 'Unknown camera'
+    })
 
 def detect_objects(frame):
     if model is None:
@@ -95,7 +192,7 @@ def detect_objects(frame):
                 conf = box.conf[0].cpu().numpy()
                 cls = int(box.cls[0].cpu().numpy())
                 
-                if conf > 0.3:  # Lowered confidence threshold from 0.5 to 0.3
+                if conf > DETECTION_CONFIDENCE:  # Use configurable confidence threshold
                     detections.append({
                         'bbox': [int(x1), int(y1), int(x2), int(y2)],
                         'confidence': float(conf),
@@ -284,7 +381,7 @@ def draw_bounding_boxes(frame, detections, analysis):
             # Draw thicker bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
             
-            # Add filled background for text
+                        # Add filled background for text
             text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
             cv2.rectangle(frame, (x1, y1-30), (x1 + text_size[0], y1), color, -1)
             
@@ -349,9 +446,13 @@ def generate_frames(camera_id=1):
                     warning_active = True
                     warning_start_time = current_time
                     print(f"\nNew warning detected on Camera {camera_id}: {analysis['categories']}")
-                    # Save screenshot immediately for new warnings
-                    save_screenshot_to_db(frame.copy(), analysis, camera_id)
-                elif current_time - warning_start_time >= 10:  # Save every 10 seconds while warning is active
+                    
+                    # Save screenshot immediately for new warnings (if enabled)
+                    if SCREENSHOT_ON_NEW_WARNING:
+                        save_screenshot_to_db(frame.copy(), analysis, camera_id)
+                        
+                elif current_time - warning_start_time >= SCREENSHOT_INTERVAL:
+                    # Save screenshot at configured interval while warning is active
                     print(f"\nWarning ongoing on Camera {camera_id}: {analysis['categories']}")
                     save_screenshot_to_db(frame.copy(), analysis, camera_id)
                     warning_start_time = current_time
@@ -407,18 +508,73 @@ def api_logs():
 
 @app.route('/api/status')
 def api_status():
-    # Check which cameras are active
+    # Check which cameras are active and include their info
     active_cameras = {}
+    camera_info = {}
+    
     for cam_id in range(1, MAX_CAMERAS + 1):
         cam = cameras.get(cam_id)
         is_active = cam is not None and cam.isOpened()
         active_cameras[cam_id] = is_active
-        print(f"Camera {cam_id} status: {'Active' if is_active else 'Inactive'}")
+        camera_info[cam_id] = get_camera_info(cam_id)
+        
     return jsonify({
         'model_loaded': model is not None,
         'active_cameras': active_cameras,
-        'max_cameras': MAX_CAMERAS
+        'camera_info': camera_info,
+        'max_cameras': MAX_CAMERAS,
+        'detection_confidence': DETECTION_CONFIDENCE,
+        'warning_interval': WARNING_INTERVAL,
+        'screenshot_interval': SCREENSHOT_INTERVAL,
+        'screenshot_on_new_warning': SCREENSHOT_ON_NEW_WARNING
     })
+
+@app.route('/api/camera_config')
+def api_camera_config():
+    """Return current camera configuration"""
+    return jsonify({
+        'cameras': list(camera_configs.values()),
+        'settings': {
+            'max_cameras': MAX_CAMERAS,
+            'detection_confidence': DETECTION_CONFIDENCE,
+            'warning_interval': WARNING_INTERVAL,
+            'screenshot_interval': SCREENSHOT_INTERVAL,
+            'screenshot_on_new_warning': SCREENSHOT_ON_NEW_WARNING
+        }
+    })
+
+@app.route('/api/reload_cameras', methods=['POST'])
+def reload_cameras():
+    """Reload camera configuration and reinitialize cameras"""
+    try:
+        # Close existing cameras
+        for cam_id, camera in cameras.items():
+            if camera is not None and camera.isOpened():
+                camera.release()
+        
+        # Clear cameras dictionary
+        cameras.clear()
+        camera_configs.clear()
+        
+        # Reload configuration
+        if load_camera_config():
+            success = initialize_cameras()
+            return jsonify({
+                'success': success,
+                'message': 'Cameras reloaded successfully' if success else 'Camera reload completed with errors',
+                'active_cameras': len([c for c in cameras.values() if c is not None and c.isOpened()])
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to reload camera configuration'
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error reloading cameras: {str(e)}'
+        })
 
 @app.route('/api/clear_logs', methods=['POST'])
 def clear_logs():
@@ -451,6 +607,19 @@ def test_model():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+    
+    # Load camera configuration first
+    if not load_camera_config():
+        print("✗ CRITICAL: Cannot start application without camera configuration")
+        print("✗ Please create camera_config.json file and try again")
+        exit(1)
+    
+    # Initialize cameras
+    if not initialize_cameras():
+        print("⚠ WARNING: No cameras were successfully initialized")
+        print("⚠ Application will start but no video feeds will be available")
+    
+    # Load the model
     load_model()
-    initialize_cameras()  # Initialize cameras at startup
+    
     app.run(debug=True, threaded=True)
