@@ -321,86 +321,37 @@ def save_screenshot_to_db(frame, analysis, camera_id=1):
         return False
 
 def draw_bounding_boxes(frame, detections, analysis):
-    # Group detections by person
-    person_detections = []
-    current_person = []
-    
+    # Draw bounding boxes for each detection of NO_Helmet and No_Boiler
     for detection in detections:
-        if not current_person:
-            current_person.append(detection)
-        else:
-            last_detection = current_person[-1]
-            x1, y1, x2, y2 = detection['bbox']
-            last_x1, last_y1, last_x2, last_y2 = last_detection['bbox']
-            
-            if (abs(x1 - last_x1) < 50 and abs(y1 - last_y1) < 50):
-                current_person.append(detection)
-            else:
-                person_detections.append(current_person)
-                current_person = [detection]
-    
-    if current_person:
-        person_detections.append(current_person)
-    
-    # Draw boxes only for unsafe people
-    for person in person_detections:
-        person_has_helmet = False
-        person_has_boiler = False
-        person_bbox = None
-        
-        for detection in person:
-            class_id = detection['class_id']
-            class_name = class_names[class_id]
-            
-            if class_name == 'Helmet':
-                person_has_helmet = True
-            elif class_name == 'NO_Helmet':
-                person_has_helmet = False
-            elif class_name == 'Boiler':
-                person_has_boiler = True
-            elif class_name == 'No_Boiler':
-                person_has_boiler = False
-            
-            # Store the bounding box
-            if person_bbox is None:
-                person_bbox = detection['bbox']
-        
-        # Only draw box if person is unsafe
-        if not person_has_helmet or not person_has_boiler:
-            x1, y1, x2, y2 = person_bbox
-            color = (0, 0, 255)  # Red for unsafe
-            
-            # Create label based on violations
-            violations = []
-            if not person_has_helmet:
-                violations.append("No Helmet")
-            if not person_has_boiler:
-                violations.append("No Boiler")
-            label = " & ".join(violations)
-            
-            # Draw thicker bounding box
+        class_id = detection['class_id']
+        class_name = class_names[class_id]
+        x1, y1, x2, y2 = detection['bbox']
+        color = (0, 0, 255)  # Red for unsafe
+        label = None
+
+        if class_name == 'NO_Helmet':
+            label = 'No Helmet'
+        elif class_name == 'No_Boiler':
+            label = 'No Boiler'
+
+        if label:
+            # Draw bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
-            
-                        # Add filled background for text
+            # Add filled background for text
             text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
             cv2.rectangle(frame, (x1, y1-30), (x1 + text_size[0], y1), color, -1)
-            
             # Draw label with white text
             cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    
+
     # Add overall status text with background
     status_text = "SAFE" if analysis['total_people'] == 0 else "WARNING"
     status_color = (0, 255, 0) if analysis['total_people'] == 0 else (0, 0, 255)
-    
     # Get text size for status
     text_size = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
-    
     # Draw status background
     cv2.rectangle(frame, (10, 10), (20 + text_size[0], 50), status_color, -1)
-    
     # Draw status text
     cv2.putText(frame, status_text, (15, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
-    
     return frame
 
 def generate_frames(camera_id=1):
